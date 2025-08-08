@@ -181,64 +181,41 @@
   }
 
   // --- Scanner ---
-  async function startScanner(){
-    setErr("");
-    try{
-      const devices = await Html5Qrcode.getCameras();
-      if (!devices || devices.length === 0){
-        setErr("Nenhuma câmera encontrada. No Chrome, toque no cadeado → Permissões → Câmera → Permitir e recarregue.");
-        return;
-      }
-      const back = devices.find(d=>/back|traseira|rear|environment/i.test(d.label||""));
-      const deviceId = (back ? back.id : devices[0].id);
-      if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId, { verbose:false });
-      await html5QrCode.start(
-        { deviceId: { exact: deviceId } },
-        { fps: 10, qrbox: 250 },
-        onScanSuccess,
-        onScanFail
-      );
-    }catch(e){
-      setErr("Não foi possível iniciar a câmera: " + e);
+  <script>
+async function startScanner(){
+  setErr("");
+  try{
+    // 1) Gatilho de permissão do navegador (abre o prompt de câmera)
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      const tmpStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      // fecha imediatamente — só queremos a permissão concedida
+      tmpStream.getTracks().forEach(t => t.stop());
     }
-  }
-  function onScanFail(_err){ /* silencioso */ }
-  async function stopScanner(){
-    setErr("");
-    if (html5QrCode){
-      try{ await html5QrCode.stop(); }catch(e){}
-      try{ await html5QrCode.clear(); }catch(e){}
-      html5QrCode = null;
+
+    // 2) Descobrir câmeras e escolher a traseira (ou a primeira disponível)
+    const devices = await Html5Qrcode.getCameras();
+    if (!devices || devices.length === 0){
+      setErr("Nenhuma câmera encontrada. No Chrome: cadeado → Permissões → Câmera → Permitir e recarregue.");
+      return;
     }
+    const back = devices.find(d => /back|traseira|rear|environment/i.test(d.label||""));
+    const deviceId = (back ? back.id : devices[0].id);
+
+    // 3) Iniciar o html5-qrcode
+    if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId, { verbose:false });
+    await html5QrCode.start(
+      { deviceId: { exact: deviceId } },
+      { fps: 10, qrbox: 250 },
+      onScanSuccess,
+      onScanFail
+    );
+    setErr(""); // limpando erros se tudo OK
+  }catch(e){
+    setErr("Não foi possível iniciar a câmera: " + e);
   }
-  function onScanSuccess(decodedText){
-    const h = hashQR(decodedText);
-    if (state.current.dedup.has(h)) return;
-    state.current.dedup.add(h);
-    let obj=null;
-    try{ obj = JSON.parse(decodedText); }catch(e){ obj = parseKeyValue(decodedText); }
-    const item = normalizeItem(obj, decodedText, h);
-    state.current.items.push(item);
-    updateUI();
-  }
-  function parseKeyValue(text){
-    const out={};
-    text.split(/\r?\n|;/).forEach(line=>{
-      const m=line.match(/^\s*([\w\-]+)\s*[:=]\s*(.+)\s*$/i);
-      if (m) out[m[1].toLowerCase()] = m[2];
-    });
-    return out;
-  }
-  function normalizeItem(obj, raw, h){
-    const peso = parseFloat(obj.peso_kg ?? obj.peso ?? obj.weight ?? 0) || 0;
-    return {
-      produto: obj.produto ?? obj.descricao ?? obj.product ?? "",
-      peso_kg: peso,
-      codigo_barras: obj.codigo_barras ?? obj.ean ?? obj.barcode ?? "",
-      lote: obj.lote ?? obj.lot ?? "",
-      qrRaw: raw, qrHash: h, ts: Date.now()
-    };
-  }
+}
+</script>
+
 
   // --- Eventos UI ---
   $("btnStart").addEventListener("click", startScanner);
