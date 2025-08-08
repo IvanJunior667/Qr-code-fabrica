@@ -37,6 +37,12 @@
         <button id="btnStart">Iniciar câmera</button>
         <button id="btnStop">Parar</button>
       </div>
+      <hr/>
+      <div style="margin-top:8px;">
+        <button id="btnTestCam">Testar câmera (simples)</button>
+        <div id="testCamResult" style="margin-top:8px;"></div>
+        <video id="testVideo" width="320" height="240" autoplay style="display:none;border:1px solid #bbb;"></video>
+      </div>
     </div>
 
     <div class="card" style="flex:1; min-width:280px;">
@@ -126,6 +132,27 @@
 
 <script>
 (function(){
+  // Teste simples de câmera
+  $("btnTestCam").addEventListener("click", async ()=>{
+    const res = $("testCamResult");
+    const vid = $("testVideo");
+    res.textContent = "Testando acesso à câmera...";
+    vid.style.display = "none";
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      res.textContent = "API de câmera não disponível neste navegador.";
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      vid.srcObject = stream;
+      vid.style.display = "block";
+      res.textContent = "Câmera aberta com sucesso! Se você vê o vídeo acima, o acesso está OK.";
+    } catch(e) {
+      res.textContent = "Erro ao abrir câmera: " + (e && e.message ? e.message : e);
+    }
+  });
+  console.log("[App] Script principal carregado.");
+  setErr("Script carregado. Pronto para iniciar câmera.");
   if (typeof window.Html5Qrcode === "undefined") {
     setTimeout(arguments.callee, 50);
     return;
@@ -165,25 +192,53 @@
 
   // NOVA FUNÇÃO startScanner()
   async function startScanner(){
-    setErr("");
-    try{
-      // 1) Força prompt de permissão
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const tmpStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        tmpStream.getTracks().forEach(t => t.stop());
+    setErr("Botão Iniciar câmera clicado. Tentando abrir câmera...");
+    console.log("[App] Botão Iniciar câmera clicado.");
+    try {
+      setErr("Iniciando câmera...");
+      console.log("[Scanner] Iniciando câmera...");
+      // Para o scanner se já estiver rodando
+      if (html5QrCode) {
+        try { await html5QrCode.stop(); } catch(e){console.warn("[Scanner] Erro ao parar:",e);}
+        try { await html5QrCode.clear(); } catch(e){console.warn("[Scanner] Erro ao limpar:",e);}
+        html5QrCode = null;
       }
-      // 2) Lista câmeras e escolhe traseira
-      const devices = await Html5Qrcode.getCameras();
-      if (!devices || devices.length === 0){
-        setErr("Nenhuma câmera encontrada. No Chrome: cadeado → Permissões → Câmera → Permitir e recarregue.");
+      // Limpa o elemento do vídeo
+      document.getElementById(qrRegionId).innerHTML = "";
+
+      // Solicita permissão apenas se necessário
+      let devices = [];
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          devices = await Html5Qrcode.getCameras();
+        } catch (e) {
+          console.warn("[Scanner] getCameras falhou, tentando forçar permissão", e);
+          await navigator.mediaDevices.getUserMedia({ video: true });
+          devices = await Html5Qrcode.getCameras();
+        }
+      } else {
+        setErr("Seu navegador não suporta acesso à câmera. Tente usar o Google Chrome ou Firefox no celular.");
         return;
       }
-      const back = devices.find(d=>/back|traseira|rear|environment/i.test(d.label||""));
+      if (!devices || devices.length === 0) {
+        setErr("Nenhuma câmera encontrada.\n\nDicas:\n- Use o Google Chrome ou Firefox.\n- Clique no cadeado ao lado do endereço, permita o acesso à câmera e recarregue a página.\n- Se estiver em computador, tente um celular.");
+        console.warn("[Scanner] Nenhum dispositivo encontrado.");
+        return;
+      }
+      const back = devices.find(d => /back|traseira|rear|environment/i.test(d.label || ""));
       const deviceId = (back ? back.id : devices[0].id);
-      if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId, { verbose:false });
-      await html5QrCode.start({ deviceId: { exact: deviceId } }, { fps: 10, qrbox: 250 }, onScanSuccess, ()=>{});
-    }catch(e){
-      setErr("Não foi possível iniciar a câmera: " + e);
+      html5QrCode = new Html5Qrcode(qrRegionId, { verbose: true });
+      await html5QrCode.start(
+        { deviceId: { exact: deviceId } },
+        { fps: 10, qrbox: 250 },
+        onScanSuccess,
+        (errMsg) => { setErr("Erro ao ler QR: " + errMsg); console.error("[Scanner] Erro ao ler QR:", errMsg); }
+      );
+      setErr("");
+      console.log("[Scanner] Câmera iniciada com sucesso.");
+    } catch (e) {
+      setErr("Não foi possível iniciar a câmera.\n\nErro: " + (e && e.message ? e.message : e) + "\n\nDicas:\n- Verifique se o navegador pediu permissão para a câmera.\n- Use o Google Chrome ou Firefox.\n- Clique no cadeado ao lado do endereço, permita o acesso à câmera e recarregue a página.\n- Se estiver em computador, tente um celular.");
+      console.error("[Scanner] Falha ao iniciar:", e);
     }
   }
 
