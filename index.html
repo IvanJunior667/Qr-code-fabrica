@@ -17,12 +17,16 @@
     #html5-qrcode-button-camera-start { margin-right: 8px; }
     .muted { color: #666; font-size: 12px; }
     .badge { padding: 2px 6px; border-radius: 4px; border: 1px solid #bbb; font-size: 12px; }
+    #err { color:#b00020; border:1px solid #b00020; padding:8px; border-radius:6px; display:none; margin-bottom:8px;}
   </style>
-  <!-- QR scanning library -->
+  <!-- Biblioteca do leitor QR -->
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/minified/html5-qrcode.min.js"></script>
 </head>
 <body>
   <h1>Leitor de QR — Somatório de Pesos</h1>
+
+  <div id="err"></div>
+
   <div class="row">
     <div class="card" style="flex:1; min-width:280px;">
       <h3>Scanner</h3>
@@ -121,56 +125,40 @@
 
 <script>
 const state = {
-  current: {
-    id: "",
-    unidade: "kg",
-    items: [], // {produto, peso_kg, codigo_barras, lote, qrRaw, qrHash, ts}
-    dedup: new Set()
-  },
-  history: [] // {id, unidade, items, totalKg, closedAt}
+  current: { id: "", unidade: "kg", items: [], dedup: new Set() },
+  history: []
 };
 
-function hashQR(text) {
-  let h = 0;
-  for (let i = 0; i < text.length; i++) {
-    h = ((h << 5) - h) + text.charCodeAt(i);
-    h |= 0;
-  }
-  return String(h);
-}
+function setErr(msg){ const e=document.getElementById('err'); e.textContent=msg||""; e.style.display=msg?"block":"none"; }
+function hashQR(text){ let h=0; for(let i=0;i<text.length;i++){h=((h<<5)-h)+text.charCodeAt(i); h|=0;} return String(h); }
+function fmt(n){ return (Math.round((n + Number.EPSILON) * 1000) / 1000).toFixed(3); }
 
-function fmt(n) { return (Math.round((n + Number.EPSILON) * 1000) / 1000).toFixed(3); }
-
-function saveLocal() {
+function saveLocal(){
   localStorage.setItem("qrpallet_state", JSON.stringify({
     current: { id: state.current.id, unidade: state.current.unidade, items: state.current.items },
     history: state.history
   }));
 }
-
-function loadLocal() {
-  try {
-    const raw = localStorage.getItem("qrpallet_state");
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    if (data.current) {
+function loadLocal(){
+  try{
+    const raw=localStorage.getItem("qrpallet_state");
+    if(!raw) return;
+    const data=JSON.parse(raw);
+    if (data.current){
       state.current.id = data.current.id || "";
       state.current.unidade = data.current.unidade || "kg";
       state.current.items = Array.isArray(data.current.items) ? data.current.items : [];
       state.current.dedup = new Set(state.current.items.map(it => it.qrHash).filter(Boolean));
     }
     if (Array.isArray(data.history)) state.history = data.history;
-  } catch (e) {
-    console.warn("Falha ao carregar estado:", e);
-  }
+  }catch(e){ console.warn("Falha ao carregar estado:", e); }
 }
 
-function updateUI() {
+function updateUI(){
   document.getElementById("palletId").value = state.current.id;
   document.getElementById("unidade").value = state.current.unidade;
 
-  const tb = document.querySelector("#tbl tbody");
-  tb.innerHTML = "";
+  const tb = document.querySelector("#tbl tbody"); tb.innerHTML = "";
   state.current.items.forEach((it, idx) => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -181,8 +169,7 @@ function updateUI() {
       <td>${it.lote || ""}</td>
       <td class="muted">${it.qrHash || ""}</td>
       <td>${new Date(it.ts).toLocaleString()}</td>
-      <td><button data-i="${idx}" class="btnDel">Excluir</button></td>
-    `;
+      <td><button data-i="${idx}" class="btnDel">Excluir</button></td>`;
     tb.appendChild(tr);
   });
 
@@ -190,8 +177,7 @@ function updateUI() {
   document.getElementById("count").textContent = state.current.items.length;
   document.getElementById("total").textContent = fmt(total);
 
-  const hb = document.querySelector("#hist tbody");
-  hb.innerHTML = "";
+  const hb = document.querySelector("#hist tbody"); hb.innerHTML = "";
   state.history.forEach(p => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -199,65 +185,77 @@ function updateUI() {
       <td>${p.items.length}</td>
       <td>${fmt(p.totalKg)}</td>
       <td>${new Date(p.closedAt).toLocaleString()}</td>
-      <td><button data-id="${p.id}" class="btnExport">CSV</button></td>
-    `;
+      <td><button data-id="${p.id}" class="btnExport">CSV</button></td>`;
     hb.appendChild(tr);
   });
 
   saveLocal();
 }
 
-// --- QR Scanner ---
+// ------- Scanner (robusto) -------
 let html5QrCode = null;
 const qrRegionId = "reader";
 
-async function startScanner() {
-  if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId);
-  try {
+async function startScanner(){
+  setErr("");
+  try{
+    // Lista câmeras e tenta escolher a traseira
+    const devices = await Html5Qrcode.getCameras();
+    if (!devices || devices.length === 0){
+      setErr("Nenhuma câmera encontrada. Verifique as permissões do site no cadeado do Chrome (Câmera → Permitir) e recarregue.");
+      return;
+    }
+    const back = devices.find(d => /back|traseira|rear|environment/i.test(d.label||""));
+    const deviceId = (back ? back.id : devices[0].id);
+
+    if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId, { verbose:false });
+
     await html5QrCode.start(
-      { facingMode: "environment" },
+      { deviceId: { exact: deviceId } },
       { fps: 10, qrbox: 250 },
-      onScanSuccess
+      onScanSuccess,
+      onScanFail
     );
-  } catch (e) {
-    alert("Não foi possível iniciar a câmera: " + e);
+  }catch(e){
+    setErr("Não foi possível iniciar a câmera: " + e + ". Toque no cadeado → Permissões → Câmera → Permitir e recarregue.");
   }
 }
 
-async function stopScanner() {
-  if (html5QrCode) {
-    try { await html5QrCode.stop(); } catch(e){}
-    try { await html5QrCode.clear(); } catch(e){}
+function onScanFail(err){ /* silencioso para não spammar */ }
+
+async function stopScanner(){
+  setErr("");
+  if (html5QrCode){
+    try{ await html5QrCode.stop(); }catch(e){}
+    try{ await html5QrCode.clear(); }catch(e){}
     html5QrCode = null;
   }
 }
 
-function onScanSuccess(decodedText, decodedResult) {
+function onScanSuccess(decodedText){
   const h = hashQR(decodedText);
   if (state.current.dedup.has(h)) return;
   state.current.dedup.add(h);
 
-  let obj = null;
-  try {
-    obj = JSON.parse(decodedText);
-  } catch (e) {
-    obj = parseKeyValue(decodedText);
-  }
+  let obj=null;
+  try{ obj = JSON.parse(decodedText); }
+  catch(e){ obj = parseKeyValue(decodedText); }
+
   const item = normalizeItem(obj, decodedText, h);
   state.current.items.push(item);
   updateUI();
 }
 
-function parseKeyValue(text) {
-  const out = {};
-  text.split(/\r?\n|;/).forEach(line => {
-    const m = line.match(/^\s*([\w\-]+)\s*[:=]\s*(.+)\s*$/i);
+function parseKeyValue(text){
+  const out={};
+  text.split(/\r?\n|;/).forEach(line=>{
+    const m=line.match(/^\s*([\w\-]+)\s*[:=]\s*(.+)\s*$/i);
     if (m) out[m[1].toLowerCase()] = m[2];
   });
   return out;
 }
 
-function normalizeItem(obj, raw, h) {
+function normalizeItem(obj, raw, h){
   const peso = parseFloat(obj.peso_kg ?? obj.peso ?? obj.weight ?? 0) || 0;
   return {
     produto: obj.produto ?? obj.descricao ?? obj.product ?? "",
@@ -270,7 +268,7 @@ function normalizeItem(obj, raw, h) {
   };
 }
 
-// --- Eventos UI ---
+// ------- Eventos UI -------
 document.getElementById("btnStart").addEventListener("click", startScanner);
 document.getElementById("btnStop").addEventListener("click", stopScanner);
 
@@ -278,7 +276,6 @@ document.getElementById("palletId").addEventListener("input", (e) => {
   state.current.id = e.target.value.trim();
   saveLocal();
 });
-
 document.getElementById("unidade").addEventListener("change", (e) => {
   state.current.unidade = e.target.value;
   saveLocal();
@@ -288,20 +285,15 @@ document.getElementById("btnAddManual").addEventListener("click", () => {
   const produto = document.getElementById("mProduto").value.trim();
   const peso = parseFloat(document.getElementById("mPeso").value);
   const ean = document.getElementById("mEAN").value.trim();
-  if (!produto || !isFinite(peso) || peso <= 0) {
-    alert("Preencha produto e um peso válido.");
-    return;
-  }
+  if (!produto || !isFinite(peso) || peso <= 0) { setErr("Preencha produto e um peso válido."); return; }
   const raw = JSON.stringify({produto, peso_kg: peso, codigo_barras: ean});
   const h = hashQR(raw) + "-M";
   state.current.dedup.add(h);
-  state.current.items.push({
-    produto, peso_kg: peso, codigo_barras: ean, lote: "", qrRaw: raw, qrHash: h, ts: Date.now()
-  });
+  state.current.items.push({ produto, peso_kg: peso, codigo_barras: ean, lote: "", qrRaw: raw, qrHash: h, ts: Date.now() });
   document.getElementById("mProduto").value = "";
   document.getElementById("mPeso").value = "";
   document.getElementById("mEAN").value = "";
-  updateUI();
+  setErr(""); updateUI();
 });
 
 document.querySelector("#tbl tbody").addEventListener("click", (e) => {
@@ -316,34 +308,19 @@ document.querySelector("#tbl tbody").addEventListener("click", (e) => {
 });
 
 document.getElementById("btnFechar").addEventListener("click", () => {
-  if (!state.current.id) {
-    alert("Defina um ID para o pallet.");
-    return;
-  }
+  if (!state.current.id) { setErr("Defina um ID para o pallet."); return; }
   const total = state.current.items.reduce((s, it) => s + Number(it.peso_kg || 0), 0);
-  const closed = {
-    id: state.current.id,
-    unidade: state.current.unidade,
-    items: state.current.items,
-    totalKg: total,
-    closedAt: Date.now()
-  };
+  const closed = { id: state.current.id, unidade: state.current.unidade, items: state.current.items, totalKg: total, closedAt: Date.now() };
   state.history.unshift(closed);
-  state.current.id = "";
-  state.current.unidade = "kg";
-  state.current.items = [];
-  state.current.dedup = new Set();
-  updateUI();
+  state.current.id = ""; state.current.unidade = "kg"; state.current.items = []; state.current.dedup = new Set();
+  setErr(""); updateUI();
   alert("Pallet fechado com sucesso!");
 });
 
 document.getElementById("btnNovo").addEventListener("click", () => {
   if (state.current.items.length && !confirm("Descartar itens do pallet atual?")) return;
-  state.current.id = "";
-  state.current.unidade = "kg";
-  state.current.items = [];
-  state.current.dedup = new Set();
-  updateUI();
+  state.current.id = ""; state.current.unidade = "kg"; state.current.items = []; state.current.dedup = new Set();
+  setErr(""); updateUI();
 });
 
 document.getElementById("btnCSV").addEventListener("click", () => {
@@ -358,27 +335,18 @@ document.querySelector("#hist tbody").addEventListener("click", (e) => {
   }
 });
 
-function exportCSV(items, id) {
+function exportCSV(items, id){
   const header = ["pallet_id","produto","peso_kg","codigo_barras","lote","timestamp"];
-  const rows = items.map(it => [
-    id, safe(it.produto), fmt(Number(it.peso_kg||0)),
-    safe(it.codigo_barras), safe(it.lote), new Date(it.ts).toISOString()
-  ]);
+  const rows = items.map(it => [ id, safe(it.produto), fmt(Number(it.peso_kg||0)), safe(it.codigo_barras), safe(it.lote), new Date(it.ts).toISOString() ]);
   const csv = [header.join(","), ...rows.map(r => r.join(","))].join("\n");
   const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${id}_itens.csv`;
-  document.body.appendChild(a);
-  a.click();
-  URL.revokeObjectURL(url);
-  a.remove();
+  const a = document.createElement("a"); a.href = url; a.download = `${id}_itens.csv`; document.body.appendChild(a); a.click();
+  URL.revokeObjectURL(url); a.remove();
 }
 function safe(s){ return (s??"").toString().replaceAll('"','""'); }
 
-loadLocal();
-updateUI();
+loadLocal(); updateUI();
 </script>
 
 <hr/>
@@ -387,7 +355,7 @@ updateUI();
   <pre>
 {"produto":"Sacola 30x40","peso_kg":12.5,"codigo_barras":"7891234567890","lote":"L2025-08-08"}
   </pre>
-  Você pode gerar essas etiquetas com qualquer gerador de QR que aceite texto/JSON.
+  Se a câmera não abrir: toque no cadeado da barra de endereço → Permissões → Câmera → Permitir e recarregue.
 </div>
 </body>
 </html>
