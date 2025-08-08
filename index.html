@@ -6,352 +6,100 @@
   <title>Somar Pesos por QR</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 16px; }
-    h1 { margin: 0 0 12px; font-size: 20px; }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    h1 { font-size: 20px; }
     .card { border: 1px solid #ccc; border-radius: 6px; padding: 12px; margin: 8px 0; }
-    label { display: block; font-size: 12px; color: #444; margin-bottom: 4px; }
-    input, select, button, textarea { padding: 8px; font-size: 14px; }
-    table { border-collapse: collapse; width: 100%; font-size: 14px; }
-    th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
-    th { background: #f3f3f3; }
     .muted { color: #666; font-size: 12px; }
     .badge { padding: 2px 6px; border-radius: 4px; border: 1px solid #bbb; font-size: 12px; }
-    #err { color: #b00020; padding: 8px; border: 1px solid #b00020; border-radius: 6px; display:none; }
   </style>
+  <!-- Biblioteca QR antes de tudo -->
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/minified/html5-qrcode.min.js"></script>
 </head>
 <body>
   <h1>Leitor de QR — Somatório de Pesos</h1>
 
-  <div id="err"></div>
-
-  <div class="row">
-    <div class="card" style="flex:1; min-width:280px;">
-      <h3>Scanner</h3>
-
-      <div class="row" style="gap:8px;">
-        <div style="min-width:220px;">
-          <label>Escolher câmera</label>
-          <select id="cameraSelect"></select>
-        </div>
-        <div style="align-self:flex-end;">
-          <button id="btnListar">Listar câmeras</button>
-        </div>
-      </div>
-
-      <div id="reader" style="width: 320px; max-width:100%; margin-top:8px;"></div>
-
-      <div class="muted" style="margin-top:8px;">
-        Aponte a câmera para o QR. Espera-se JSON com: <code>produto</code>, <code>peso_kg</code>, <code>codigo_barras</code>, opcional <code>lote</code>.
-      </div>
-
-      <div style="margin-top:8px;">
-        <button id="btnStart">Iniciar câmera</button>
-        <button id="btnStop">Parar</button>
-      </div>
-    </div>
-
-    <div class="card" style="flex:1; min-width:280px;">
-      <h3>Pallet atual</h3>
-      <div class="row">
-        <div>
-          <label>ID do pallet</label>
-          <input id="palletId" placeholder="Ex: PAL-2025-001" />
-        </div>
-        <div>
-          <label>Unidade padrão</label>
-          <select id="unidade">
-            <option value="kg" selected>kg</option>
-            <option value="milheiro">milheiro</option>
-          </select>
-        </div>
-      </div>
-      <div class="row" style="margin-top:8px; gap:8px;">
-        <button id="btnFechar">Fechar pallet</button>
-        <button id="btnNovo">Novo pallet</button>
-        <button id="btnCSV">Exportar CSV</button>
-      </div>
-      <div style="margin-top:8px;">
-        <span class="badge">Pacotes: <span id="count">0</span></span>
-        <span class="badge">Peso total (kg): <span id="total">0.000</span></span>
-      </div>
-    </div>
+  <div class="card">
+    <h3>Scanner</h3>
+    <div id="reader" style="width: 320px; max-width:100%;"></div>
+    <button id="btnStart">Iniciar câmera</button>
+    <button id="btnStop">Parar</button>
+    <p class="muted">Escaneie QR com: <code>produto</code>, <code>peso_kg</code>, <code>codigo_barras</code>, <code>lote</code>.</p>
   </div>
 
   <div class="card">
-    <h3>Adicionar manualmente (caso necessário)</h3>
-    <div class="row">
-      <div style="flex:2; min-width:200px;">
-        <label>Produto</label>
-        <input id="mProduto" placeholder="Descrição" />
-      </div>
-      <div>
-        <label>Peso (kg)</label>
-        <input id="mPeso" type="number" step="0.001" min="0" placeholder="0.000" />
-      </div>
-      <div style="flex:2; min-width:180px;">
-        <label>Código de barras (opcional)</label>
-        <input id="mEAN" placeholder="789..." />
-      </div>
-      <div style="min-width:120px;">
-        <label>&nbsp;</label>
-        <button id="btnAddManual">Adicionar</button>
-      </div>
-    </div>
+    <h3>Pallet atual</h3>
+    ID: <input id="palletId">
+    <p><span class="badge">Pacotes: <span id="count">0</span></span>
+    <span class="badge">Peso total (kg): <span id="total">0.000</span></span></p>
+    <button id="btnFechar">Fechar pallet</button>
   </div>
 
   <div class="card">
-    <h3>Pacotes no pallet</h3>
-    <table id="tbl">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Produto</th>
-          <th>Peso (kg)</th>
-          <th>Cód. Barras</th>
-          <th>Lote</th>
-          <th>QR (hash)</th>
-          <th>Hora</th>
-          <th>Ações</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h3>Histórico de pallets</h3>
-    <div class="muted">Os pallets fechados ficam salvos no navegador (localStorage). Exporte o CSV regularmente.</div>
-    <table id="hist">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Pacotes</th>
-          <th>Peso total (kg)</th>
-          <th>Data/hora fechamento</th>
-          <th>Exportar</th>
-        </tr>
-      </thead>
+    <h3>Itens</h3>
+    <table id="tbl" border="1" width="100%">
+      <thead><tr><th>#</th><th>Produto</th><th>Peso</th><th>Cód. Barras</th><th>Lote</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
 
 <script>
-const state = {
-  current: { id: "", unidade: "kg", items: [], dedup: new Set() },
-  history: []
-};
-let html5QrCode = null;
-const qrRegionId = "reader";
+window.addEventListener("load", () => {
+  const state = { current: { id: "", items: [], dedup: new Set() } };
+  const $ = id => document.getElementById(id);
 
-const $ = (id)=>document.getElementById(id);
-const showErr = (msg)=>{
-  const e = $("err");
-  e.textContent = msg;
-  e.style.display = msg ? "block" : "none";
-};
-
-function hashQR(text){ let h=0; for(let i=0;i<text.length;i++){h=((h<<5)-h)+text.charCodeAt(i); h|=0;} return String(h); }
-function fmt(n){ return (Math.round((n+Number.EPSILON)*1000)/1000).toFixed(3); }
-function saveLocal(){ localStorage.setItem("qrpallet_state", JSON.stringify({ current:{ id:state.current.id, unidade:state.current.unidade, items:state.current.items }, history:state.history })); }
-function loadLocal(){ try{ const raw=localStorage.getItem("qrpallet_state"); if(!raw) return; const data=JSON.parse(raw); if(data.current){ state.current.id=data.current.id||""; state.current.unidade=data.current.unidade||"kg"; state.current.items=Array.isArray(data.current.items)?data.current.items:[]; state.current.dedup=new Set(state.current.items.map(it=>it.qrHash).filter(Boolean)); } if(Array.isArray(data.history)) state.history=data.history; }catch(e){ console.warn("Falha ao carregar estado:", e); } }
-function updateUI(){
-  $("palletId").value=state.current.id;
-  $("unidade").value=state.current.unidade;
-  const tb=document.querySelector("#tbl tbody"); tb.innerHTML="";
-  state.current.items.forEach((it,idx)=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${idx+1}</td>
-      <td>${it.produto||""}</td>
-      <td>${fmt(Number(it.peso_kg||0))}</td>
-      <td>${it.codigo_barras||""}</td>
-      <td>${it.lote||""}</td>
-      <td class="muted">${it.qrHash||""}</td>
-      <td>${new Date(it.ts).toLocaleString()}</td>
-      <td><button data-i="${idx}" class="btnDel">Excluir</button></td>`;
-    tb.appendChild(tr);
-  });
-  const total=state.current.items.reduce((s,it)=>s+Number(it.peso_kg||0),0);
-  $("count").textContent=state.current.items.length;
-  $("total").textContent=fmt(total);
-  const hb=document.querySelector("#hist tbody"); hb.innerHTML="";
-  state.history.forEach(p=>{
-    const tr=document.createElement("tr");
-    tr.innerHTML=`
-      <td>${p.id}</td>
-      <td>${p.items.length}</td>
-      <td>${fmt(p.totalKg)}</td>
-      <td>${new Date(p.closedAt).toLocaleString()}</td>
-      <td><button data-id="${p.id}" class="btnExport">CSV</button></td>`;
-    hb.appendChild(tr);
-  });
-  saveLocal();
-}
-
-async function listarCameras(){
-  showErr("");
-  try{
-    const devices = await Html5Qrcode.getCameras();
-    const sel = $("cameraSelect");
-    sel.innerHTML = "";
-    if (!devices || devices.length === 0) {
-      showErr("Nenhuma câmera encontrada. Verifique as permissões do navegador.");
-      return;
-    }
-    devices.forEach((d,i)=>{
-      const o=document.createElement("option");
-      o.value = d.id;
-      o.textContent = d.label || `Câmera ${i+1}`;
-      sel.appendChild(o);
+  function fmt(n) { return (Math.round(n*1000)/1000).toFixed(3); }
+  function updateUI() {
+    $("palletId").value = state.current.id;
+    $("count").textContent = state.current.items.length;
+    $("total").textContent = fmt(state.current.items.reduce((s,i)=>s+i.peso_kg,0));
+    const tb = $("tbl").querySelector("tbody");
+    tb.innerHTML = "";
+    state.current.items.forEach((it,idx)=>{
+      tb.innerHTML += `<tr><td>${idx+1}</td><td>${it.produto}</td><td>${fmt(it.peso_kg)}</td><td>${it.codigo_barras}</td><td>${it.lote}</td></tr>`;
     });
-    // pré-seleciona a traseira se existir
-    const back = devices.find(d=>/back|traseira|rear|environment/i.test(d.label||""));
-    if (back) sel.value = back.id;
-  }catch(e){
-    showErr("Erro ao listar câmeras: "+ e);
   }
-}
 
-async function startScanner(){
-  showErr("");
-  if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId, { verbose: false });
-  const deviceId = $("cameraSelect").value;
-  try{
-    if (deviceId) {
-      await html5QrCode.start(
-        { deviceId: { exact: deviceId } },
-        { fps: 10, qrbox: 250 },
-        onScanSuccess,
-        onScanFail
-      );
-    } else {
-      // fallback
-      await html5QrCode.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: 250 },
-        onScanSuccess,
-        onScanFail
-      );
-    }
-  }catch(e){
-    showErr("Não foi possível iniciar a câmera: " + e);
+  function onScanSuccess(decodedText) {
+    if(state.current.dedup.has(decodedText)) return;
+    state.current.dedup.add(decodedText);
+    let obj;
+    try { obj = JSON.parse(decodedText); }
+    catch { return alert("QR inválido"); }
+    state.current.items.push({
+      produto: obj.produto || "",
+      peso_kg: parseFloat(obj.peso_kg) || 0,
+      codigo_barras: obj.codigo_barras || "",
+      lote: obj.lote || ""
+    });
+    updateUI();
   }
-}
 
-function onScanFail(err){ /* silencioso */ }
-
-async function stopScanner(){
-  showErr("");
-  if (html5QrCode) {
-    try{ await html5QrCode.stop(); }catch(e){}
-    try{ await html5QrCode.clear(); }catch(e){}
-    html5QrCode = null;
-  }
-}
-
-function onScanSuccess(decodedText){
-  const h=hashQR(decodedText);
-  if(state.current.dedup.has(h)) return;
-  state.current.dedup.add(h);
-  let obj=null;
-  try{ obj=JSON.parse(decodedText); }
-  catch(e){ obj=parseKeyValue(decodedText); }
-  const item=normalizeItem(obj, decodedText, h);
-  state.current.items.push(item);
-  updateUI();
-}
-
-function parseKeyValue(text){
-  const out={};
-  text.split(/\r?\n|;/).forEach(line=>{
-    const m=line.match(/^\s*([\w\-]+)\s*[:=]\s*(.+)\s*$/i);
-    if(m) out[m[1].toLowerCase()]=m[2];
+  let html5QrCode;
+  $("btnStart").addEventListener("click", () => {
+    html5QrCode = new Html5Qrcode("reader");
+    Html5Qrcode.getCameras().then(cameras => {
+      if (cameras.length) {
+        html5QrCode.start(
+          { deviceId: { exact: cameras[0].id } },
+          { fps: 10, qrbox: 250 },
+          onScanSuccess
+        );
+      } else {
+        alert("Nenhuma câmera encontrada");
+      }
+    }).catch(err => alert("Erro câmera: " + err));
   });
-  return out;
-}
 
-function normalizeItem(obj, raw, h){
-  const peso=parseFloat(obj.peso_kg??obj.peso??obj.weight??0)||0;
-  return { produto:obj.produto??obj.descricao??obj.product??"",
-    peso_kg:peso, codigo_barras:obj.codigo_barras??obj.ean??obj.barcode??"",
-    lote:obj.lote??obj.lot??"", qrRaw:raw, qrHash:h, ts:Date.now() };
-}
+  $("btnStop").addEventListener("click", () => {
+    if (html5QrCode) html5QrCode.stop();
+  });
 
-$("btnListar").addEventListener("click", listarCameras);
-$("btnStart").addEventListener("click", startScanner);
-$("btnStop").addEventListener("click", stopScanner);
-$("palletId").addEventListener("input",(e)=>{ state.current.id=e.target.value.trim(); saveLocal(); });
-$("unidade").addEventListener("change",(e)=>{ state.current.unidade=e.target.value; saveLocal(); });
+  $("btnFechar").addEventListener("click", () => {
+    state.current = { id: "", items: [], dedup: new Set() };
+    updateUI();
+  });
 
-document.querySelector("#tbl tbody").addEventListener("click",(e)=>{
-  if (e.target.classList.contains("btnDel")){
-    const idx=parseInt(e.target.getAttribute("data-i"));
-    if(!isFinite(idx)) return;
-    const it=state.current.items[idx];
-    if (it?.qrHash) state.current.dedup.delete(it.qrHash);
-    state.current.items.splice(idx,1); updateUI();
-  }
+  updateUI();
 });
-
-$("btnAddManual").addEventListener("click", ()=>{
-  const produto=$("mProduto").value.trim();
-  const peso=parseFloat($("mPeso").value);
-  const ean=$("mEAN").value.trim();
-  if(!produto||!isFinite(peso)||peso<=0){ showErr("Preencha produto e um peso válido."); return; }
-  const raw=JSON.stringify({produto,peso_kg:peso,codigo_barras:ean});
-  const h=hashQR(raw)+"-M"; state.current.dedup.add(h);
-  state.current.items.push({produto,peso_kg:peso,codigo_barras:ean,lote:"",qrRaw:raw,qrHash:h,ts:Date.now()});
-  $("mProduto").value=""; $("mPeso").value=""; $("mEAN").value=""; updateUI();
-  showErr("");
-});
-
-$("btnFechar").addEventListener("click", ()=>{
-  if(!state.current.id){ showErr("Defina um ID para o pallet."); return; }
-  const total=state.current.items.reduce((s,it)=>s+Number(it.peso_kg||0),0);
-  const closed={ id:state.current.id, unidade:state.current.unidade, items:state.current.items, totalKg:total, closedAt:Date.now() };
-  state.history.unshift(closed);
-  state.current.id=""; state.current.unidade="kg"; state.current.items=[]; state.current.dedup=new Set(); updateUI();
-  alert("Pallet fechado com sucesso!");
-});
-
-$("btnNovo").addEventListener("click", ()=>{
-  if(state.current.items.length && !confirm("Descartar itens do pallet atual?")) return;
-  state.current.id=""; state.current.unidade="kg"; state.current.items=[]; state.current.dedup=new Set(); updateUI(); showErr("");
-});
-
-$("btnCSV").addEventListener("click", ()=>{ exportCSV(state.current.items, state.current.id || "pallet_atual"); });
-
-document.querySelector("#hist tbody").addEventListener("click",(e)=>{
-  if(e.target.classList.contains("btnExport")){
-    const id=e.target.getAttribute("data-id");
-    const p=state.history.find(x=>x.id===id);
-    if(p) exportCSV(p.items, p.id);
-  }
-});
-
-function exportCSV(items,id){
-  const header=["pallet_id","produto","peso_kg","codigo_barras","lote","timestamp"];
-  const rows=items.map(it=>[ id, safe(it.produto), fmt(Number(it.peso_kg||0)), safe(it.codigo_barras), safe(it.lote), new Date(it.ts).toISOString() ]);
-  const csv=[header.join(","), ...rows.map(r=>r.join(","))].join("\n");
-  const blob=new Blob([csv], {type:"text/csv;charset=utf-8;"});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement("a"); a.href=url; a.download=`${id}_itens.csv`; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
-}
-function safe(s){ return (s??"").toString().replaceAll('"','""'); }
-
-// tenta listar câmeras assim que a página carrega
-window.addEventListener("load", listarCameras);
-loadLocal(); updateUI();
 </script>
-
-<hr/>
-<div class="muted">
-  <strong>Formato sugerido do QR (exemplo):</strong>
-  <pre>
-{"produto":"Sacola 30x40","peso_kg":12.5,"codigo_barras":"7891234567890","lote":"L2025-08-08"}
-  </pre>
-  Dica: se aparecer “Nenhuma câmera encontrada”, toque no cadeado da barra de endereço → Permissões → Câmera → Permitir e recarregue a página.
-</div>
 </body>
 </html>
