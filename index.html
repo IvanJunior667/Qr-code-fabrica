@@ -19,7 +19,8 @@
     .badge { padding: 2px 6px; border-radius: 4px; border: 1px solid #bbb; font-size: 12px; }
     #err { color:#b00020; border:1px solid #b00020; padding:8px; border-radius:6px; display:none; margin-bottom:8px;}
   </style>
-  <!-- Biblioteca do leitor QR -->
+
+  <!-- Biblioteca do leitor QR: deve carregar antes de qualquer uso -->
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/minified/html5-qrcode.min.js"></script>
 </head>
 <body>
@@ -31,7 +32,7 @@
     <div class="card" style="flex:1; min-width:280px;">
       <h3>Scanner</h3>
       <div id="reader" style="width: 320px; max-width:100%;"></div>
-      <div class="muted">Aponte a câmera para o QR. Espera-se um JSON com campos: <code>produto</code>, <code>peso_kg</code>, <code>codigo_barras</code>, opcionalmente <code>lote</code>.</div>
+      <div class="muted">JSON esperado: <code>produto</code>, <code>peso_kg</code>, <code>codigo_barras</code>, opcional <code>lote</code>.</div>
       <div style="margin-top:8px;">
         <button id="btnStart">Iniciar câmera</button>
         <button id="btnStop">Parar</button>
@@ -108,7 +109,7 @@
 
   <div class="card">
     <h3>Histórico de pallets</h3>
-    <div class="muted">Os pallets fechados ficam salvos no navegador (localStorage). Exporte o CSV regularmente.</div>
+    <div class="muted">Pallets fechados ficam no navegador (localStorage). Exporte o CSV regularmente.</div>
     <table id="hist">
       <thead>
         <tr>
@@ -124,229 +125,179 @@
   </div>
 
 <script>
-const state = {
-  current: { id: "", unidade: "kg", items: [], dedup: new Set() },
-  history: []
-};
-
-function setErr(msg){ const e=document.getElementById('err'); e.textContent=msg||""; e.style.display=msg?"block":"none"; }
-function hashQR(text){ let h=0; for(let i=0;i<text.length;i++){h=((h<<5)-h)+text.charCodeAt(i); h|=0;} return String(h); }
-function fmt(n){ return (Math.round((n + Number.EPSILON) * 1000) / 1000).toFixed(3); }
-
-function saveLocal(){
-  localStorage.setItem("qrpallet_state", JSON.stringify({
-    current: { id: state.current.id, unidade: state.current.unidade, items: state.current.items },
-    history: state.history
-  }));
-}
-function loadLocal(){
-  try{
-    const raw=localStorage.getItem("qrpallet_state");
-    if(!raw) return;
-    const data=JSON.parse(raw);
-    if (data.current){
-      state.current.id = data.current.id || "";
-      state.current.unidade = data.current.unidade || "kg";
-      state.current.items = Array.isArray(data.current.items) ? data.current.items : [];
-      state.current.dedup = new Set(state.current.items.map(it => it.qrHash).filter(Boolean));
-    }
-    if (Array.isArray(data.history)) state.history = data.history;
-  }catch(e){ console.warn("Falha ao carregar estado:", e); }
-}
-
-function updateUI(){
-  document.getElementById("palletId").value = state.current.id;
-  document.getElementById("unidade").value = state.current.unidade;
-
-  const tb = document.querySelector("#tbl tbody"); tb.innerHTML = "";
-  state.current.items.forEach((it, idx) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${idx+1}</td>
-      <td>${it.produto || ""}</td>
-      <td>${fmt(Number(it.peso_kg||0))}</td>
-      <td>${it.codigo_barras || ""}</td>
-      <td>${it.lote || ""}</td>
-      <td class="muted">${it.qrHash || ""}</td>
-      <td>${new Date(it.ts).toLocaleString()}</td>
-      <td><button data-i="${idx}" class="btnDel">Excluir</button></td>`;
-    tb.appendChild(tr);
-  });
-
-  const total = state.current.items.reduce((s, it) => s + Number(it.peso_kg || 0), 0);
-  document.getElementById("count").textContent = state.current.items.length;
-  document.getElementById("total").textContent = fmt(total);
-
-  const hb = document.querySelector("#hist tbody"); hb.innerHTML = "";
-  state.history.forEach(p => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${p.id}</td>
-      <td>${p.items.length}</td>
-      <td>${fmt(p.totalKg)}</td>
-      <td>${new Date(p.closedAt).toLocaleString()}</td>
-      <td><button data-id="${p.id}" class="btnExport">CSV</button></td>`;
-    hb.appendChild(tr);
-  });
-
-  saveLocal();
-}
-
-// ------- Scanner (robusto) -------
-let html5QrCode = null;
-const qrRegionId = "reader";
-
-async function startScanner(){
-  setErr("");
-  try{
-    // Lista câmeras e tenta escolher a traseira
-    const devices = await Html5Qrcode.getCameras();
-    if (!devices || devices.length === 0){
-      setErr("Nenhuma câmera encontrada. Verifique as permissões do site no cadeado do Chrome (Câmera → Permitir) e recarregue.");
-      return;
-    }
-    const back = devices.find(d => /back|traseira|rear|environment/i.test(d.label||""));
-    const deviceId = (back ? back.id : devices[0].id);
-
-    if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId, { verbose:false });
-
-    await html5QrCode.start(
-      { deviceId: { exact: deviceId } },
-      { fps: 10, qrbox: 250 },
-      onScanSuccess,
-      onScanFail
-    );
-  }catch(e){
-    setErr("Não foi possível iniciar a câmera: " + e + ". Toque no cadeado → Permissões → Câmera → Permitir e recarregue.");
+(function initWhenLibraryReady() {
+  // Aguarda a biblioteca estar disponível (evita "Html5Qrcode is not defined")
+  if (typeof window.Html5Qrcode === "undefined") {
+    setTimeout(initWhenLibraryReady, 50);
+    return;
   }
-}
 
-function onScanFail(err){ /* silencioso para não spammar */ }
+  // --- Estado ---
+  const state = { current: { id: "", unidade: "kg", items: [], dedup: new Set() }, history: [] };
+  let html5QrCode = null;
+  const qrRegionId = "reader";
 
-async function stopScanner(){
-  setErr("");
-  if (html5QrCode){
-    try{ await html5QrCode.stop(); }catch(e){}
-    try{ await html5QrCode.clear(); }catch(e){}
-    html5QrCode = null;
+  // --- Util ---
+  const $ = (id)=>document.getElementById(id);
+  const setErr = (msg)=>{ const e=$("err"); e.textContent=msg||""; e.style.display=msg?"block":"none"; };
+  function hashQR(text){ let h=0; for(let i=0;i<text.length;i++){h=((h<<5)-h)+text.charCodeAt(i); h|=0;} return String(h); }
+  function fmt(n){ return (Math.round((n + Number.EPSILON) * 1000) / 1000).toFixed(3); }
+  function saveLocal(){ localStorage.setItem("qrpallet_state", JSON.stringify({ current:{ id:state.current.id, unidade:state.current.unidade, items:state.current.items }, history:state.history })); }
+  function loadLocal(){ try{ const raw=localStorage.getItem("qrpallet_state"); if(!raw) return; const data=JSON.parse(raw);
+    if (data.current){ state.current.id=data.current.id||""; state.current.unidade=data.current.unidade||"kg"; state.current.items=Array.isArray(data.current.items)?data.current.items:[]; state.current.dedup=new Set(state.current.items.map(it=>it.qrHash).filter(Boolean)); }
+    if (Array.isArray(data.history)) state.history=data.history; }catch(e){ console.warn("Falha ao carregar estado:", e); } }
+  function updateUI(){
+    $("palletId").value = state.current.id;
+    $("unidade").value = state.current.unidade;
+    const tb=document.querySelector("#tbl tbody"); tb.innerHTML="";
+    state.current.items.forEach((it,idx)=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML=`
+        <td>${idx+1}</td>
+        <td>${it.produto || ""}</td>
+        <td>${fmt(Number(it.peso_kg||0))}</td>
+        <td>${it.codigo_barras || ""}</td>
+        <td>${it.lote || ""}</td>
+        <td class="muted">${it.qrHash || ""}</td>
+        <td>${new Date(it.ts).toLocaleString()}</td>
+        <td><button data-i="${idx}" class="btnDel">Excluir</button></td>`;
+      tb.appendChild(tr);
+    });
+    const total=state.current.items.reduce((s,it)=>s+Number(it.peso_kg||0),0);
+    $("count").textContent = state.current.items.length;
+    $("total").textContent = fmt(total);
+    const hb=document.querySelector("#hist tbody"); hb.innerHTML="";
+    state.history.forEach(p=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML=`
+        <td>${p.id}</td>
+        <td>${p.items.length}</td>
+        <td>${fmt(p.totalKg)}</td>
+        <td>${new Date(p.closedAt).toLocaleString()}</td>
+        <td><button data-id="${p.id}" class="btnExport">CSV</button></td>`;
+      hb.appendChild(tr);
+    });
+    saveLocal();
   }
-}
 
-function onScanSuccess(decodedText){
-  const h = hashQR(decodedText);
-  if (state.current.dedup.has(h)) return;
-  state.current.dedup.add(h);
-
-  let obj=null;
-  try{ obj = JSON.parse(decodedText); }
-  catch(e){ obj = parseKeyValue(decodedText); }
-
-  const item = normalizeItem(obj, decodedText, h);
-  state.current.items.push(item);
-  updateUI();
-}
-
-function parseKeyValue(text){
-  const out={};
-  text.split(/\r?\n|;/).forEach(line=>{
-    const m=line.match(/^\s*([\w\-]+)\s*[:=]\s*(.+)\s*$/i);
-    if (m) out[m[1].toLowerCase()] = m[2];
-  });
-  return out;
-}
-
-function normalizeItem(obj, raw, h){
-  const peso = parseFloat(obj.peso_kg ?? obj.peso ?? obj.weight ?? 0) || 0;
-  return {
-    produto: obj.produto ?? obj.descricao ?? obj.product ?? "",
-    peso_kg: peso,
-    codigo_barras: obj.codigo_barras ?? obj.ean ?? obj.barcode ?? "",
-    lote: obj.lote ?? obj.lot ?? "",
-    qrRaw: raw,
-    qrHash: h,
-    ts: Date.now()
-  };
-}
-
-// ------- Eventos UI -------
-document.getElementById("btnStart").addEventListener("click", startScanner);
-document.getElementById("btnStop").addEventListener("click", stopScanner);
-
-document.getElementById("palletId").addEventListener("input", (e) => {
-  state.current.id = e.target.value.trim();
-  saveLocal();
-});
-document.getElementById("unidade").addEventListener("change", (e) => {
-  state.current.unidade = e.target.value;
-  saveLocal();
-});
-
-document.getElementById("btnAddManual").addEventListener("click", () => {
-  const produto = document.getElementById("mProduto").value.trim();
-  const peso = parseFloat(document.getElementById("mPeso").value);
-  const ean = document.getElementById("mEAN").value.trim();
-  if (!produto || !isFinite(peso) || peso <= 0) { setErr("Preencha produto e um peso válido."); return; }
-  const raw = JSON.stringify({produto, peso_kg: peso, codigo_barras: ean});
-  const h = hashQR(raw) + "-M";
-  state.current.dedup.add(h);
-  state.current.items.push({ produto, peso_kg: peso, codigo_barras: ean, lote: "", qrRaw: raw, qrHash: h, ts: Date.now() });
-  document.getElementById("mProduto").value = "";
-  document.getElementById("mPeso").value = "";
-  document.getElementById("mEAN").value = "";
-  setErr(""); updateUI();
-});
-
-document.querySelector("#tbl tbody").addEventListener("click", (e) => {
-  if (e.target.classList.contains("btnDel")) {
-    const idx = parseInt(e.target.getAttribute("data-i"));
-    if (!isFinite(idx)) return;
-    const it = state.current.items[idx];
-    if (it?.qrHash) state.current.dedup.delete(it.qrHash);
-    state.current.items.splice(idx, 1);
+  // --- Scanner ---
+  async function startScanner(){
+    setErr("");
+    try{
+      const devices = await Html5Qrcode.getCameras();
+      if (!devices || devices.length === 0){
+        setErr("Nenhuma câmera encontrada. No Chrome, toque no cadeado → Permissões → Câmera → Permitir e recarregue.");
+        return;
+      }
+      const back = devices.find(d=>/back|traseira|rear|environment/i.test(d.label||""));
+      const deviceId = (back ? back.id : devices[0].id);
+      if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId, { verbose:false });
+      await html5QrCode.start(
+        { deviceId: { exact: deviceId } },
+        { fps: 10, qrbox: 250 },
+        onScanSuccess,
+        onScanFail
+      );
+    }catch(e){
+      setErr("Não foi possível iniciar a câmera: " + e);
+    }
+  }
+  function onScanFail(_err){ /* silencioso */ }
+  async function stopScanner(){
+    setErr("");
+    if (html5QrCode){
+      try{ await html5QrCode.stop(); }catch(e){}
+      try{ await html5QrCode.clear(); }catch(e){}
+      html5QrCode = null;
+    }
+  }
+  function onScanSuccess(decodedText){
+    const h = hashQR(decodedText);
+    if (state.current.dedup.has(h)) return;
+    state.current.dedup.add(h);
+    let obj=null;
+    try{ obj = JSON.parse(decodedText); }catch(e){ obj = parseKeyValue(decodedText); }
+    const item = normalizeItem(obj, decodedText, h);
+    state.current.items.push(item);
     updateUI();
   }
-});
-
-document.getElementById("btnFechar").addEventListener("click", () => {
-  if (!state.current.id) { setErr("Defina um ID para o pallet."); return; }
-  const total = state.current.items.reduce((s, it) => s + Number(it.peso_kg || 0), 0);
-  const closed = { id: state.current.id, unidade: state.current.unidade, items: state.current.items, totalKg: total, closedAt: Date.now() };
-  state.history.unshift(closed);
-  state.current.id = ""; state.current.unidade = "kg"; state.current.items = []; state.current.dedup = new Set();
-  setErr(""); updateUI();
-  alert("Pallet fechado com sucesso!");
-});
-
-document.getElementById("btnNovo").addEventListener("click", () => {
-  if (state.current.items.length && !confirm("Descartar itens do pallet atual?")) return;
-  state.current.id = ""; state.current.unidade = "kg"; state.current.items = []; state.current.dedup = new Set();
-  setErr(""); updateUI();
-});
-
-document.getElementById("btnCSV").addEventListener("click", () => {
-  exportCSV(state.current.items, state.current.id || "pallet_atual");
-});
-
-document.querySelector("#hist tbody").addEventListener("click", (e) => {
-  if (e.target.classList.contains("btnExport")) {
-    const id = e.target.getAttribute("data-id");
-    const p = state.history.find(x => x.id === id);
-    if (p) exportCSV(p.items, p.id);
+  function parseKeyValue(text){
+    const out={};
+    text.split(/\r?\n|;/).forEach(line=>{
+      const m=line.match(/^\s*([\w\-]+)\s*[:=]\s*(.+)\s*$/i);
+      if (m) out[m[1].toLowerCase()] = m[2];
+    });
+    return out;
   }
-});
+  function normalizeItem(obj, raw, h){
+    const peso = parseFloat(obj.peso_kg ?? obj.peso ?? obj.weight ?? 0) || 0;
+    return {
+      produto: obj.produto ?? obj.descricao ?? obj.product ?? "",
+      peso_kg: peso,
+      codigo_barras: obj.codigo_barras ?? obj.ean ?? obj.barcode ?? "",
+      lote: obj.lote ?? obj.lot ?? "",
+      qrRaw: raw, qrHash: h, ts: Date.now()
+    };
+  }
 
-function exportCSV(items, id){
-  const header = ["pallet_id","produto","peso_kg","codigo_barras","lote","timestamp"];
-  const rows = items.map(it => [ id, safe(it.produto), fmt(Number(it.peso_kg||0)), safe(it.codigo_barras), safe(it.lote), new Date(it.ts).toISOString() ]);
-  const csv = [header.join(","), ...rows.map(r => r.join(","))].join("\n");
-  const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href = url; a.download = `${id}_itens.csv`; document.body.appendChild(a); a.click();
-  URL.revokeObjectURL(url); a.remove();
-}
-function safe(s){ return (s??"").toString().replaceAll('"','""'); }
+  // --- Eventos UI ---
+  $("btnStart").addEventListener("click", startScanner);
+  $("btnStop").addEventListener("click", stopScanner);
+  $("palletId").addEventListener("input", (e)=>{ state.current.id = e.target.value.trim(); saveLocal(); });
+  $("unidade").addEventListener("change", (e)=>{ state.current.unidade = e.target.value; saveLocal(); });
+  document.getElementById("btnAddManual").addEventListener("click", () => {
+    const produto = $("mProduto").value.trim();
+    const peso = parseFloat($("mPeso").value);
+    const ean = $("mEAN").value.trim();
+    if (!produto || !isFinite(peso) || peso <= 0) { setErr("Preencha produto e um peso válido."); return; }
+    const raw = JSON.stringify({produto, peso_kg: peso, codigo_barras: ean});
+    const h = hashQR(raw) + "-M";
+    state.current.dedup.add(h);
+    state.current.items.push({ produto, peso_kg: peso, codigo_barras: ean, lote: "", qrRaw: raw, qrHash: h, ts: Date.now() });
+    $("mProduto").value = ""; $("mPeso").value = ""; $("mEAN").value = ""; setErr(""); updateUI();
+  });
+  document.querySelector("#tbl tbody").addEventListener("click", (e) => {
+    if (e.target.classList.contains("btnDel")) {
+      const idx = parseInt(e.target.getAttribute("data-i"));
+      if (!isFinite(idx)) return;
+      const it = state.current.items[idx];
+      if (it?.qrHash) state.current.dedup.delete(it.qrHash);
+      state.current.items.splice(idx, 1); updateUI();
+    }
+  });
+  $("btnFechar").addEventListener("click", ()=>{
+    if (!state.current.id) { setErr("Defina um ID para o pallet."); return; }
+    const total = state.current.items.reduce((s,it)=>s+Number(it.peso_kg||0),0);
+    const closed = { id: state.current.id, unidade: state.current.unidade, items: state.current.items, totalKg: total, closedAt: Date.now() };
+    state.history.unshift(closed);
+    state.current.id=""; state.current.unidade="kg"; state.current.items=[]; state.current.dedup=new Set();
+    setErr(""); updateUI(); alert("Pallet fechado com sucesso!");
+  });
+  $("btnNovo").addEventListener("click", ()=>{
+    if (state.current.items.length && !confirm("Descartar itens do pallet atual?")) return;
+    state.current.id=""; state.current.unidade="kg"; state.current.items=[]; state.current.dedup=new Set();
+    setErr(""); updateUI();
+  });
+  $("btnCSV").addEventListener("click", ()=>{ exportCSV(state.current.items, state.current.id || "pallet_atual"); });
+  document.querySelector("#hist tbody").addEventListener("click",(e)=>{
+    if(e.target.classList.contains("btnExport")){
+      const id=e.target.getAttribute("data-id"); const p=state.history.find(x=>x.id===id);
+      if(p) exportCSV(p.items, p.id);
+    }
+  });
+  function exportCSV(items,id){
+    const header=["pallet_id","produto","peso_kg","codigo_barras","lote","timestamp"];
+    const rows=items.map(it=>[ id, safe(it.produto), fmt(Number(it.peso_kg||0)), safe(it.codigo_barras), safe(it.lote), new Date(it.ts).toISOString() ]);
+    const csv=[header.join(","), ...rows.map(r=>r.join(","))].join("\n");
+    const blob=new Blob([csv], {type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=`${id}_itens.csv`; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+  }
+  function safe(s){ return (s??"").toString().replaceAll('"','""'); }
 
-loadLocal(); updateUI();
+  // Inicializa
+  loadLocal(); updateUI();
+})();
 </script>
 
 <hr/>
@@ -355,7 +306,7 @@ loadLocal(); updateUI();
   <pre>
 {"produto":"Sacola 30x40","peso_kg":12.5,"codigo_barras":"7891234567890","lote":"L2025-08-08"}
   </pre>
-  Se a câmera não abrir: toque no cadeado da barra de endereço → Permissões → Câmera → Permitir e recarregue.
+  Se a câmera não abrir: no Chrome, toque no cadeado → Permissões → Câmera → Permitir e recarregue.
 </div>
 </body>
 </html>
