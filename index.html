@@ -20,7 +20,7 @@
     #err { color:#b00020; border:1px solid #b00020; padding:8px; border-radius:6px; display:none; margin-bottom:8px;}
   </style>
 
-  <!-- Biblioteca do leitor QR: deve carregar antes de qualquer uso -->
+  <!-- Biblioteca do leitor QR -->
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/minified/html5-qrcode.min.js"></script>
 </head>
 <body>
@@ -125,19 +125,15 @@
   </div>
 
 <script>
-(function initWhenLibraryReady() {
-  // Aguarda a biblioteca estar disponível (evita "Html5Qrcode is not defined")
+(function(){
   if (typeof window.Html5Qrcode === "undefined") {
-    setTimeout(initWhenLibraryReady, 50);
+    setTimeout(arguments.callee, 50);
     return;
   }
 
-  // --- Estado ---
   const state = { current: { id: "", unidade: "kg", items: [], dedup: new Set() }, history: [] };
   let html5QrCode = null;
   const qrRegionId = "reader";
-
-  // --- Util ---
   const $ = (id)=>document.getElementById(id);
   const setErr = (msg)=>{ const e=$("err"); e.textContent=msg||""; e.style.display=msg?"block":"none"; };
   function hashQR(text){ let h=0; for(let i=0;i<text.length;i++){h=((h<<5)-h)+text.charCodeAt(i); h|=0;} return String(h); }
@@ -145,22 +141,14 @@
   function saveLocal(){ localStorage.setItem("qrpallet_state", JSON.stringify({ current:{ id:state.current.id, unidade:state.current.unidade, items:state.current.items }, history:state.history })); }
   function loadLocal(){ try{ const raw=localStorage.getItem("qrpallet_state"); if(!raw) return; const data=JSON.parse(raw);
     if (data.current){ state.current.id=data.current.id||""; state.current.unidade=data.current.unidade||"kg"; state.current.items=Array.isArray(data.current.items)?data.current.items:[]; state.current.dedup=new Set(state.current.items.map(it=>it.qrHash).filter(Boolean)); }
-    if (Array.isArray(data.history)) state.history=data.history; }catch(e){ console.warn("Falha ao carregar estado:", e); } }
+    if (Array.isArray(data.history)) state.history=data.history; }catch(e){} }
   function updateUI(){
     $("palletId").value = state.current.id;
     $("unidade").value = state.current.unidade;
     const tb=document.querySelector("#tbl tbody"); tb.innerHTML="";
     state.current.items.forEach((it,idx)=>{
       const tr=document.createElement("tr");
-      tr.innerHTML=`
-        <td>${idx+1}</td>
-        <td>${it.produto || ""}</td>
-        <td>${fmt(Number(it.peso_kg||0))}</td>
-        <td>${it.codigo_barras || ""}</td>
-        <td>${it.lote || ""}</td>
-        <td class="muted">${it.qrHash || ""}</td>
-        <td>${new Date(it.ts).toLocaleString()}</td>
-        <td><button data-i="${idx}" class="btnDel">Excluir</button></td>`;
+      tr.innerHTML=`<td>${idx+1}</td><td>${it.produto || ""}</td><td>${fmt(Number(it.peso_kg||0))}</td><td>${it.codigo_barras || ""}</td><td>${it.lote || ""}</td><td class="muted">${it.qrHash || ""}</td><td>${new Date(it.ts).toLocaleString()}</td><td><button data-i="${idx}" class="btnDel">Excluir</button></td>`;
       tb.appendChild(tr);
     });
     const total=state.current.items.reduce((s,it)=>s+Number(it.peso_kg||0),0);
@@ -169,60 +157,63 @@
     const hb=document.querySelector("#hist tbody"); hb.innerHTML="";
     state.history.forEach(p=>{
       const tr=document.createElement("tr");
-      tr.innerHTML=`
-        <td>${p.id}</td>
-        <td>${p.items.length}</td>
-        <td>${fmt(p.totalKg)}</td>
-        <td>${new Date(p.closedAt).toLocaleString()}</td>
-        <td><button data-id="${p.id}" class="btnExport">CSV</button></td>`;
+      tr.innerHTML=`<td>${p.id}</td><td>${p.items.length}</td><td>${fmt(p.totalKg)}</td><td>${new Date(p.closedAt).toLocaleString()}</td><td><button data-id="${p.id}" class="btnExport">CSV</button></td>`;
       hb.appendChild(tr);
     });
     saveLocal();
   }
 
-  // --- Scanner ---
-  <script>
-async function startScanner(){
-  setErr("");
-  try{
-    // 1) Gatilho de permissão do navegador (abre o prompt de câmera)
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      const tmpStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      // fecha imediatamente — só queremos a permissão concedida
-      tmpStream.getTracks().forEach(t => t.stop());
+  // NOVA FUNÇÃO startScanner()
+  async function startScanner(){
+    setErr("");
+    try{
+      // 1) Força prompt de permissão
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const tmpStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        tmpStream.getTracks().forEach(t => t.stop());
+      }
+      // 2) Lista câmeras e escolhe traseira
+      const devices = await Html5Qrcode.getCameras();
+      if (!devices || devices.length === 0){
+        setErr("Nenhuma câmera encontrada. No Chrome: cadeado → Permissões → Câmera → Permitir e recarregue.");
+        return;
+      }
+      const back = devices.find(d=>/back|traseira|rear|environment/i.test(d.label||""));
+      const deviceId = (back ? back.id : devices[0].id);
+      if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId, { verbose:false });
+      await html5QrCode.start({ deviceId: { exact: deviceId } }, { fps: 10, qrbox: 250 }, onScanSuccess, ()=>{});
+    }catch(e){
+      setErr("Não foi possível iniciar a câmera: " + e);
     }
-
-    // 2) Descobrir câmeras e escolher a traseira (ou a primeira disponível)
-    const devices = await Html5Qrcode.getCameras();
-    if (!devices || devices.length === 0){
-      setErr("Nenhuma câmera encontrada. No Chrome: cadeado → Permissões → Câmera → Permitir e recarregue.");
-      return;
-    }
-    const back = devices.find(d => /back|traseira|rear|environment/i.test(d.label||""));
-    const deviceId = (back ? back.id : devices[0].id);
-
-    // 3) Iniciar o html5-qrcode
-    if (!html5QrCode) html5QrCode = new Html5Qrcode(qrRegionId, { verbose:false });
-    await html5QrCode.start(
-      { deviceId: { exact: deviceId } },
-      { fps: 10, qrbox: 250 },
-      onScanSuccess,
-      onScanFail
-    );
-    setErr(""); // limpando erros se tudo OK
-  }catch(e){
-    setErr("Não foi possível iniciar a câmera: " + e);
   }
-}
-</script>
 
+  async function stopScanner(){ setErr(""); if (html5QrCode){ try{ await html5QrCode.stop(); }catch(e){} try{ await html5QrCode.clear(); }catch(e){} html5QrCode = null; } }
+  function onScanSuccess(decodedText){
+    const h = hashQR(decodedText);
+    if (state.current.dedup.has(h)) return;
+    state.current.dedup.add(h);
+    let obj=null;
+    try{ obj = JSON.parse(decodedText); }catch(e){ obj = parseKeyValue(decodedText); }
+    const item = normalizeItem(obj, decodedText, h);
+    state.current.items.push(item);
+    updateUI();
+  }
+  function parseKeyValue(text){
+    const out={}; text.split(/\r?\n|;/).forEach(line=>{
+      const m=line.match(/^\s*([\w\-]+)\s*[:=]\s*(.+)\s*$/i);
+      if (m) out[m[1].toLowerCase()] = m[2];
+    }); return out;
+  }
+  function normalizeItem(obj, raw, h){
+    const peso = parseFloat(obj.peso_kg ?? obj.peso ?? obj.weight ?? 0) || 0;
+    return { produto: obj.produto ?? obj.descricao ?? obj.product ?? "", peso_kg: peso, codigo_barras: obj.codigo_barras ?? obj.ean ?? obj.barcode ?? "", lote: obj.lote ?? obj.lot ?? "", qrRaw: raw, qrHash: h, ts: Date.now() };
+  }
 
-  // --- Eventos UI ---
   $("btnStart").addEventListener("click", startScanner);
   $("btnStop").addEventListener("click", stopScanner);
   $("palletId").addEventListener("input", (e)=>{ state.current.id = e.target.value.trim(); saveLocal(); });
   $("unidade").addEventListener("change", (e)=>{ state.current.unidade = e.target.value; saveLocal(); });
-  document.getElementById("btnAddManual").addEventListener("click", () => {
+  $("btnAddManual").addEventListener("click", () => {
     const produto = $("mProduto").value.trim();
     const peso = parseFloat($("mPeso").value);
     const ean = $("mEAN").value.trim();
@@ -272,7 +263,6 @@ async function startScanner(){
   }
   function safe(s){ return (s??"").toString().replaceAll('"','""'); }
 
-  // Inicializa
   loadLocal(); updateUI();
 })();
 </script>
@@ -283,7 +273,6 @@ async function startScanner(){
   <pre>
 {"produto":"Sacola 30x40","peso_kg":12.5,"codigo_barras":"7891234567890","lote":"L2025-08-08"}
   </pre>
-  Se a câmera não abrir: no Chrome, toque no cadeado → Permissões → Câmera → Permitir e recarregue.
 </div>
 </body>
 </html>
